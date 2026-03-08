@@ -7,6 +7,39 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzFhM2E2YiIvPgogIDxyZWN0IHg9IjUiIHk9IjEwIiB3aWR0aD0iMjIiIGhlaWdodD0iMTQiIHJ4PSIyIiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8bGluZSB4MT0iNSIgeTE9IjE1IiB4Mj0iMjciIHkyPSIxNSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPGxpbmUgeDE9IjgiIHkxPSIyMCIgeDI9IjEyIiB5Mj0iMjAiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICA8bGluZSB4MT0iMTQiIHkxPSIyMCIgeDI9IjE4IiB5Mj0iMjAiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+">
     <link rel="shortcut icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzFhM2E2YiIvPgogIDxyZWN0IHg9IjUiIHk9IjEwIiB3aWR0aD0iMjIiIGhlaWdodD0iMTQiIHJ4PSIyIiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8bGluZSB4MT0iNSIgeTE9IjE1IiB4Mj0iMjciIHkyPSIxNSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPGxpbmUgeDE9IjgiIHkxPSIyMCIgeDI9IjEyIiB5Mj0iMjAiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICA8bGluZSB4MT0iMTQiIHkxPSIyMCIgeDI9IjE4IiB5Mj0iMjAiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+">
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;600;700&family=Source+Serif+4:wght@300;400;600&display=swap" rel="stylesheet">
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyBA3HDOpcsmBRAkaU0v1T-n7KO0ZuVOlMw",
+    authDomain: "flash-account.firebaseapp.com",
+    databaseURL: "https://flash-account-default-rtdb.firebaseio.com",
+    projectId: "flash-account",
+    storageBucket: "flash-account.firebasestorage.app",
+    messagingSenderId: "99988146138",
+    appId: "1:99988146138:web:6e229612f202778d1162e3"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const firebaseDB = firebase.database();
+
+  // ── Firebase helpers ──
+  async function fbGet(path) {
+    try {
+      const snap = await firebaseDB.ref(path).once('value');
+      return snap.val();
+    } catch(e) { console.warn('fbGet error', e); return null; }
+  }
+  async function fbSet(path, data) {
+    try { await firebaseDB.ref(path).set(data); } catch(e) { console.warn('fbSet error', e); }
+  }
+  function fbListen(path, cb) {
+    firebaseDB.ref(path).on('value', snap => cb(snap.val()));
+  }
+  function fbUnlisten(path) {
+    firebaseDB.ref(path).off();
+  }
+</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
@@ -812,31 +845,36 @@ function checkGate() {
 /* ════════ LOGIN FLOW ════════ */
 let pendingUsername = '';
 const MAX_LOGIN = 5;
-const ATTEMPTS_KEY = 'crestfield_attempts';
+// ── Login attempts: stored in Firebase + localStorage fallback ──
+let _attemptsCache = {};
 
-function loadAttempts() {
-  try { return JSON.parse(localStorage.getItem(ATTEMPTS_KEY)) || {}; } catch(e) { return {}; }
-}
-function saveAttempts(attempts) {
-  try { localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(attempts)); } catch(e) {}
+async function loadAttempts() {
+  try {
+    const data = await fbGet('attempts');
+    _attemptsCache = data || {};
+    return _attemptsCache;
+  } catch(e) {
+    try { return JSON.parse(localStorage.getItem('crestfield_attempts')) || {}; } catch(e2) { return {}; }
+  }
 }
 function getUserAttempts(uname) {
-  return loadAttempts()[uname] || 0;
+  return _attemptsCache[uname] || 0;
 }
-function incrementAttempts(uname) {
-  const a = loadAttempts();
-  a[uname] = (a[uname] || 0) + 1;
-  saveAttempts(a);
-  // Auto-lock the user in USERS if max reached
-  if (a[uname] >= MAX_LOGIN && USERS[uname]) {
+async function incrementAttempts(uname) {
+  _attemptsCache[uname] = (_attemptsCache[uname] || 0) + 1;
+  await fbSet('attempts', _attemptsCache);
+  localStorage.setItem('crestfield_attempts', JSON.stringify(_attemptsCache));
+  if (_attemptsCache[uname] >= MAX_LOGIN && USERS[uname]) {
     USERS[uname].locked = true;
+    await fbSet('locks/' + uname, true);
   }
-  return a[uname];
+  return _attemptsCache[uname];
 }
-function resetAttempts(uname) {
-  const a = loadAttempts();
-  delete a[uname];
-  saveAttempts(a);
+async function resetAttempts(uname) {
+  delete _attemptsCache[uname];
+  await fbSet('attempts', _attemptsCache);
+  await fbSet('locks/' + uname, false);
+  localStorage.setItem('crestfield_attempts', JSON.stringify(_attemptsCache));
 }
 
 function nextStep() {
@@ -911,10 +949,27 @@ function doLogin() {
 let currentUser = null, currentUsername = null, selId = null;
 
 /* ── Persistent storage ── */
-const DB_KEY = 'crestfield_db';
-function loadDB() { try { return JSON.parse(localStorage.getItem(DB_KEY)) || {}; } catch(e) { return {}; } }
-function saveDB() { try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch(e) {} }
-let db = loadDB();
+// ── Account DB: Firebase + localStorage fallback ──
+let db = {};
+async function loadDB() {
+  try {
+    const data = await fbGet('accounts');
+    db = data || {};
+    localStorage.setItem('crestfield_db', JSON.stringify(db));
+    return db;
+  } catch(e) {
+    try { db = JSON.parse(localStorage.getItem('crestfield_db')) || {}; } catch(e2) { db = {}; }
+    return db;
+  }
+}
+async function saveDB() {
+  try {
+    await fbSet('accounts', db);
+    localStorage.setItem('crestfield_db', JSON.stringify(db));
+  } catch(e) {
+    try { localStorage.setItem('crestfield_db', JSON.stringify(db)); } catch(e2) {}
+  }
+}
 const uid = () => 'TXN' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
 const acctMask = () => '****' + Math.floor(1000 + Math.random() * 9000);
 const routing = '021000089';
@@ -945,21 +1000,26 @@ function logout() {
   show('loginScreen');
 }
 
-function renderDash() {
+async function renderDash() {
   document.getElementById('userName').textContent = currentUser.split(' ')[0];
   document.getElementById('lastLogin').textContent = ts();
+
+  // Show loading state while fetching from Firebase
+  document.getElementById('accList').innerHTML = '<div style="padding:1.5rem;text-align:center;color:var(--gray-400);font-size:13px;">Loading accounts…</div>';
+
+  await loadDB(); // fetch latest from Firebase
+
   if (!db[currentUsername]) {
     // Brand new user — create their first account
     const id = acctMask();
     db[currentUsername] = { accounts: [{ id, name: 'Crestfield Checking', balance: 5000, transactions: [{ type: 'dep', amount: 5000, note: 'Direct deposit — Payroll', time: ts(), ref: uid() }] }], sel: id };
-    saveDB();
+    await saveDB();
   } else {
-    // Returning user — make sure transactions arrays exist on all accounts (safety check)
+    // Returning user — safety check
     db[currentUsername].accounts.forEach(a => {
       if (!Array.isArray(a.transactions)) a.transactions = [];
     });
   }
-  // Restore selId from saved db so history survives refresh
   selId = db[currentUsername].sel || db[currentUsername].accounts[0]?.id;
   switchTab('accounts', document.querySelector('.dash-nav-item'));
   renderAccList();
@@ -1239,6 +1299,7 @@ function createAccount() {
 .admin-log-dot.err{background:#f87171;}
 .admin-log-dot.info{background:#60a5fa;}
 .log-filter-btn.active{background:rgba(37,99,196,.5)!important;border-color:rgba(96,165,250,.5)!important;color:white!important;}
+@keyframes pulseDot{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(.7);}}
 
 /* admin modal */
 .admin-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:1000;padding:1rem;}
@@ -1372,7 +1433,7 @@ function createAccount() {
       <!-- Activity Log -->
       <div class="admin-section">
         <div class="admin-section-header" style="flex-wrap:wrap;gap:.5rem;">
-          <div class="admin-section-title">📋 Activity Log</div>
+          <div class="admin-section-title">📋 Activity Log <span id="liveIndicator" style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:10px;font-weight:600;color:#4ade80;text-transform:none;letter-spacing:0;"><span style="width:6px;height:6px;background:#4ade80;border-radius:50%;display:inline-block;animation:pulseDot 1.5s infinite;"></span>LIVE</span></div>
           <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;">
             <button class="btn-tbl btn-tbl-blue log-filter-btn active" onclick="setLogFilter('all',this)">All</button>
             <button class="btn-tbl btn-tbl-blue log-filter-btn" onclick="setLogFilter('login',this)">🔑 Logins</button>
@@ -1426,6 +1487,7 @@ function adminLogin() {
     document.getElementById('adminPanelView').style.display = 'flex';
     renderAdminPanel();
     addLog('Admin signed in', 'ok');
+    startLogPolling();
   } else {
     err.textContent = 'Incorrect admin username or password.';
     err.classList.add('show');
@@ -1434,6 +1496,7 @@ function adminLogin() {
 }
 
 function adminLogout() {
+  stopLogPolling();
   document.getElementById('adminPanelView').style.display = 'none';
   document.getElementById('adminLoginView').style.display = 'flex';
   document.getElementById('adminUsername').value = '';
@@ -1442,7 +1505,7 @@ function adminLogout() {
 }
 
 function renderAdminPanel() {
-  adminLogEntries = loadLog(); // always pull fresh from storage
+  // Log is kept fresh by Firebase listener — no need to reload manually
   const users = Object.entries(USERS);
   const locked = users.filter(([,v]) => v.locked).length;
   document.getElementById('statUsers').textContent = users.length;
@@ -1507,10 +1570,10 @@ function unlockUser(uname) {
   showAdminToast(`✓ ${USERS[uname].displayName}'s account has been unlocked.`);
 }
 
-function clearUserData(uname) {
+async function clearUserData(uname) {
   if (!confirm(`Clear all account data for ${USERS[uname].displayName}? This removes all accounts and transactions but keeps the user.`)) return;
   delete db[uname];
-  saveDB();
+  await saveDB();
   addLog(`Cleared account data for: ${USERS[uname].displayName} (${uname})`, 'warn');
   showAdminToast(`✓ All data cleared for ${USERS[uname].displayName}.`);
   renderAdminPanel();
@@ -1649,24 +1712,35 @@ function adminModalSave() {
 }
 
 /* ════════ LOG ════════ */
-const LOG_KEY = 'crestfield_log';
-function loadLog() { try { return JSON.parse(localStorage.getItem(LOG_KEY)) || []; } catch(e) { return []; } }
-function saveLog() { try { localStorage.setItem(LOG_KEY, JSON.stringify(adminLogEntries)); } catch(e) {} }
+// ── Activity Log: Firebase realtime ──
+let adminLogEntries = [];
 
-function addLog(msg, type, category) {
+function loadLog() {
+  return adminLogEntries;
+}
+async function saveLog() {
+  try {
+    // Store as object keyed by timestamp for Firebase (arrays don't work well)
+    const logObj = {};
+    adminLogEntries.forEach((e, i) => { logObj[i] = e; });
+    await fbSet('activityLog', logObj);
+    localStorage.setItem('crestfield_log', JSON.stringify(adminLogEntries));
+  } catch(e) {
+    try { localStorage.setItem('crestfield_log', JSON.stringify(adminLogEntries)); } catch(e2) {}
+  }
+}
+async function addLog(msg, type, category) {
   const entry = {
     msg, type,
     category: category || 'admin',
     time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-    date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+    ts: Date.now()
   };
   adminLogEntries.unshift(entry);
   if (adminLogEntries.length > 200) adminLogEntries.pop();
-  saveLog();
+  await saveLog();
 }
-
-// Load log from storage on startup
-let adminLogEntries = loadLog();
 
 let logFilter = 'all';
 function renderLog() {
@@ -1695,24 +1769,67 @@ function setLogFilter(f, el) {
   renderLog();
 }
 
-function clearLog() {
+async function clearLog() {
   if (confirm('Clear all activity log entries?')) {
     adminLogEntries = [];
-    saveLog();
+    await fbSet('activityLog', null);
+    localStorage.removeItem('crestfield_log');
     renderLog();
   }
 }
 
 function showAdminToast(msg) { showToast(msg); }
 
-/* ════════ RESTORE LOCK STATE ON LOAD ════════ */
-(function restoreLockState() {
-  const attempts = loadAttempts();
-  Object.entries(attempts).forEach(([uname, count]) => {
-    if (count >= MAX_LOGIN && USERS[uname]) {
-      USERS[uname].locked = true;
-    }
+/* ════════ REAL-TIME LOG LISTENER (Firebase) ════════ */
+function startLogPolling() {
+  stopLogPolling();
+  fbListen('activityLog', data => {
+    if (!data) { adminLogEntries = []; renderLog(); return; }
+    // Convert Firebase object back to array, sort by ts descending
+    const entries = Object.values(data).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    adminLogEntries = entries;
+    renderLog();
+    updateStatBadge(entries);
   });
+}
+
+function stopLogPolling() {
+  fbUnlisten('activityLog');
+}
+
+function updateStatBadge(entries) {
+  // Refresh stats in case users/locks changed
+  const users = Object.entries(USERS);
+  const locked = users.filter(([,v]) => v.locked).length;
+  document.getElementById('statUsers').textContent = users.length;
+  document.getElementById('statActive').textContent = users.length - locked;
+  document.getElementById('statLocked').textContent = locked;
+  document.getElementById('statCode').textContent = SITE_CODE;
+  document.getElementById('codeDisplay').textContent = SITE_CODE;
+  // Flash the log panel to signal new entry
+  const logEl = document.getElementById('adminLog');
+  if (logEl) {
+    logEl.style.transition = 'background .3s';
+    logEl.style.background = 'rgba(74,222,128,.05)';
+    setTimeout(() => logEl.style.background = '', 600);
+  }
+}
+
+/* ════════ RESTORE LOCK STATE FROM FIREBASE ON LOAD ════════ */
+(async function restoreLockState() {
+  await loadAttempts(); // populates _attemptsCache from Firebase
+  Object.entries(_attemptsCache).forEach(([uname, count]) => {
+    if (count >= MAX_LOGIN && USERS[uname]) USERS[uname].locked = true;
+  });
+  // Also restore explicit locks
+  try {
+    const locks = await fbGet('locks');
+    if (locks) {
+      Object.entries(locks).forEach(([uname, locked]) => {
+        if (USERS[uname]) USERS[uname].locked = locked === true;
+      });
+    }
+  } catch(e) {}
 })();
 
 /* ════════ SECRET ADMIN ROUTE ════════ */
