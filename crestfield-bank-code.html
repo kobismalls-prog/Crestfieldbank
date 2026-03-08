@@ -809,8 +809,33 @@ function checkGate() {
 
 /* ════════ LOGIN FLOW ════════ */
 let pendingUsername = '';
-let loginAttempts = 0;
 const MAX_LOGIN = 5;
+const ATTEMPTS_KEY = 'crestfield_attempts';
+
+function loadAttempts() {
+  try { return JSON.parse(localStorage.getItem(ATTEMPTS_KEY)) || {}; } catch(e) { return {}; }
+}
+function saveAttempts(attempts) {
+  try { localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(attempts)); } catch(e) {}
+}
+function getUserAttempts(uname) {
+  return loadAttempts()[uname] || 0;
+}
+function incrementAttempts(uname) {
+  const a = loadAttempts();
+  a[uname] = (a[uname] || 0) + 1;
+  saveAttempts(a);
+  // Auto-lock the user in USERS if max reached
+  if (a[uname] >= MAX_LOGIN && USERS[uname]) {
+    USERS[uname].locked = true;
+  }
+  return a[uname];
+}
+function resetAttempts(uname) {
+  const a = loadAttempts();
+  delete a[uname];
+  saveAttempts(a);
+}
 
 function nextStep() {
   const username = document.getElementById('loginUsername').value.trim().toLowerCase();
@@ -847,20 +872,28 @@ function togglePass() {
 }
 
 function doLogin() {
-  if (loginAttempts >= MAX_LOGIN) { document.getElementById('step2Err').textContent = 'Account locked. Please call 1-800-CREST-BK.'; document.getElementById('step2Err').classList.add('show'); return; }
+  const currentAttempts = getUserAttempts(pendingUsername);
+  if (currentAttempts >= MAX_LOGIN || USERS[pendingUsername].locked) {
+    err.textContent = 'This account is locked due to too many failed attempts. Please contact the administrator.';
+    err.classList.add('show'); return;
+  }
   const password = document.getElementById('loginPassword').value;
   const err = document.getElementById('step2Err');
   if (!password) { err.textContent = 'Please enter your password.'; err.classList.add('show'); return; }
   if (USERS[pendingUsername].locked) { err.textContent = 'This account has been locked by an administrator. Please contact support.'; err.classList.add('show'); return; }
-  if (USERS[pendingUsername].password !== password) {    loginAttempts++;
-    const rem = MAX_LOGIN - loginAttempts;
-    if (rem <= 0) { err.textContent = 'Too many failed attempts. Account locked. Call 1-800-CREST-BK.'; }
-    else { err.textContent = `Incorrect password. ${rem} attempt${rem !== 1 ? 's' : ''} remaining before account lock.`; }
+  if (USERS[pendingUsername].password !== password) {
+    const attempts = incrementAttempts(pendingUsername);
+    const rem = MAX_LOGIN - attempts;
+    if (rem <= 0) {
+      err.textContent = 'Account locked due to too many failed attempts. Contact the administrator to unlock.';
+    } else {
+      err.textContent = `Incorrect password. ${rem} attempt${rem !== 1 ? 's' : ''} remaining before account lock.`;
+    }
     err.classList.add('show');
     document.getElementById('loginPassword').value = '';
     return;
   }
-  loginAttempts = 0;
+  resetAttempts(pendingUsername);
   err.classList.remove('show');
   currentUser = USERS[pendingUsername].displayName;
   document.getElementById('loginPassword').value = '';
@@ -869,7 +902,13 @@ function doLogin() {
 }
 
 /* ════════ CORE STATE ════════ */
-let currentUser = null, db = {}, selId = null;
+let currentUser = null, selId = null;
+
+/* ── Persistent storage ── */
+const DB_KEY = 'crestfield_db';
+function loadDB() { try { return JSON.parse(localStorage.getItem(DB_KEY)) || {}; } catch(e) { return {}; } }
+function saveDB() { try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch(e) {} }
+let db = loadDB();
 const uid = () => 'TXN' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
 const acctMask = () => '****' + Math.floor(1000 + Math.random() * 9000);
 const routing = '021000089';
@@ -892,7 +931,7 @@ function switchTab(name, el) {
 
 function logout() {
   currentUser = null; selId = null;
-  pendingUsername = ''; loginAttempts = 0;
+  pendingUsername = '';
   document.getElementById('loginUsername').value = '';
   document.getElementById('loginPassword').value = '';
   backStep();
@@ -905,6 +944,7 @@ function renderDash() {
   if (!db[currentUser]) {
     const id = acctMask();
     db[currentUser] = { accounts: [{ id, name: 'Crestfield Checking', balance: 5000, transactions: [{ type: 'dep', amount: 5000, note: 'Direct deposit — Payroll', time: ts(), ref: uid() }] }], sel: id };
+    saveDB();
   }
   switchTab('accounts', document.querySelector('.dash-nav-item'));
   renderAccList();
@@ -922,7 +962,7 @@ function renderAccList() {
 }
 
 function selectAccount(id) {
-  db[currentUser].sel = id; selId = id; renderAccList();
+  db[currentUser].sel = id; selId = id; saveDB(); renderAccList();
   const no = document.getElementById('noAccState'), main = document.getElementById('mainPanel');
   if (!id) { no.style.display = 'block'; main.style.display = 'none'; return; }
   no.style.display = 'none'; main.style.display = 'block';
@@ -973,6 +1013,7 @@ function doDeposit() {
   if (!amt || amt <= 0) { showAlert(al, 'Please enter a valid deposit amount.', 'err'); return; }
   const a = getAcc(); a.balance += amt;
   a.transactions.push({ type: 'dep', amount: amt, note, time: ts(), ref: uid() });
+  saveDB();
   document.getElementById('depAmt').value = ''; document.getElementById('depNote').value = '';
   showAlert(al, `✓ Your deposit of ${fmt(amt)} has been processed successfully.`, 'ok');
   refreshMain();
@@ -986,6 +1027,7 @@ function doWithdraw() {
   const a = getAcc();
   if (amt > a.balance) { showAlert(al, 'This transaction exceeds your available balance.', 'err'); return; }
   a.balance -= amt; a.transactions.push({ type: 'wd', amount: amt, note, time: ts(), ref: uid() });
+  saveDB();
   document.getElementById('wdAmt').value = ''; document.getElementById('wdNote').value = '';
   showAlert(al, `✓ Your withdrawal of ${fmt(amt)} has been processed successfully.`, 'ok');
   refreshMain();
@@ -1013,6 +1055,7 @@ function doTransfer() {
   const ref = uid();
   from.balance -= amt; from.transactions.push({ type: 'xfr-out', amount: amt, note: `Transfer to ${to.name} — ${note}`, time: ts(), ref });
   to.balance += amt; to.transactions.push({ type: 'xfr-in', amount: amt, note: `Transfer from ${from.name} — ${note}`, time: ts(), ref });
+  saveDB();
   document.getElementById('xfrAmt').value = ''; document.getElementById('xfrNote').value = '';
   showAlert(al, `✓ ${fmt(amt)} transferred from ${from.name} to ${to.name} successfully.`, 'ok');
   populateTransferDropdowns();
@@ -1071,6 +1114,7 @@ function createAccount() {
   const id = acctMask();
   const txns = bal > 0 ? [{ type: 'dep', amount: bal, note: 'Opening deposit', time: ts(), ref: uid() }] : [];
   db[currentUser].accounts.push({ id, name, balance: bal, transactions: txns });
+  saveDB();
   closeModal('newAcc'); selectAccount(id);
   showToast(`✓ ${name} opened successfully.`);
 }
@@ -1363,9 +1407,12 @@ function renderUserTable() {
   }
   users.forEach(([uname, udata]) => {
     const tr = document.createElement('tr');
+    const attemptCount = getUserAttempts(uname);
     const statusBadge = udata.locked
-      ? '<span class="admin-badge locked">🔒 Locked</span>'
-      : '<span class="admin-badge active">✓ Active</span>';
+      ? `<span class="admin-badge locked">🔒 Locked</span> <span style="font-size:11px;color:rgba(255,255,255,.3);">${attemptCount} failed attempt${attemptCount!==1?'s':''}</span>`
+      : attemptCount > 0
+        ? `<span class="admin-badge active">✓ Active</span> <span style="font-size:11px;color:#fbbf24;">${attemptCount} failed attempt${attemptCount!==1?'s':''}</span>`
+        : '<span class="admin-badge active">✓ Active</span>';
     tr.innerHTML = `
       <td data-label="Name"><strong style="color:white;">${udata.displayName}</strong></td>
       <td data-label="Username"><code style="color:#60a5fa;font-size:12.5px;">${uname}</code></td>
@@ -1379,6 +1426,7 @@ function renderUserTable() {
             ? `<button class="btn-tbl btn-tbl-green" onclick="unlockUser('${uname}')">Unlock</button>`
             : `<button class="btn-tbl btn-tbl-yellow" onclick="lockUser('${uname}')">Lock</button>`}
           <button class="btn-tbl btn-tbl-red" onclick="deleteUser('${uname}')">Delete</button>
+          <button class="btn-tbl btn-tbl-yellow" onclick="clearUserData('${uname}')">Clear Data</button>
         </div>
       </td>`;
     tbody.appendChild(tr);
@@ -1396,10 +1444,19 @@ function lockUser(uname) {
 
 function unlockUser(uname) {
   USERS[uname].locked = false;
-  loginAttempts = 0;
+  resetAttempts(uname);
   addLog(`Unlocked account: ${USERS[uname].displayName} (${uname})`, 'ok');
   renderAdminPanel();
   showAdminToast(`✓ ${USERS[uname].displayName}'s account has been unlocked.`);
+}
+
+function clearUserData(uname) {
+  if (!confirm(`Clear all account data for ${USERS[uname].displayName}? This removes all accounts and transactions but keeps the user.`)) return;
+  delete db[USERS[uname].displayName];
+  saveDB();
+  addLog(`Cleared account data for: ${USERS[uname].displayName} (${uname})`, 'warn');
+  showAdminToast(`✓ All data cleared for ${USERS[uname].displayName}.`);
+  renderAdminPanel();
 }
 
 function deleteUser(uname) {
@@ -1503,6 +1560,7 @@ function adminModalSave() {
     if (pass !== confirm) { showErr('Passwords do not match.'); return; }
     USERS[editingUsername].password = pass;
     USERS[editingUsername].locked = false;
+    resetAttempts(editingUsername);
     addLog(`Password reset for: ${USERS[editingUsername].displayName} (${editingUsername})`, 'warn');
     showAdminToast(`✓ Password reset for ${USERS[editingUsername].displayName}. Account unlocked.`);
 
@@ -1553,6 +1611,16 @@ function renderLog() {
 function clearLog() { if (confirm('Clear all activity log entries?')) { adminLogEntries = []; renderLog(); } }
 
 function showAdminToast(msg) { showToast(msg); }
+
+/* ════════ RESTORE LOCK STATE ON LOAD ════════ */
+(function restoreLockState() {
+  const attempts = loadAttempts();
+  Object.entries(attempts).forEach(([uname, count]) => {
+    if (count >= MAX_LOGIN && USERS[uname]) {
+      USERS[uname].locked = true;
+    }
+  });
+})();
 
 /* ════════ SECRET ADMIN ROUTE ════════ */
 function checkAdminRoute() {
