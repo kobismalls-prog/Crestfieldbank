@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -588,7 +589,7 @@ body{font-family:'Source Sans 3',sans-serif;background:var(--gray-100);color:var
           <div class="summary-row fade-in">
             <div class="summary-card"><div class="summary-card-label">Total Deposits</div><div class="summary-card-value credit" id="sumDep">$0.00</div><div class="summary-card-sub" id="sumDepCount">0 transactions</div></div>
             <div class="summary-card"><div class="summary-card-label">Total Withdrawals</div><div class="summary-card-value debit" id="sumWd">$0.00</div><div class="summary-card-sub" id="sumWdCount">0 transactions</div></div>
-            <div class="summary-card"><div class="summary-card-label">All Transactions</div><div class="summary-card-value" id="sumTotal">0</div><div class="summary-card-sub">Total activity</div></div>
+            <div class="summary-card"><div class="summary-card-label">All Transactions</div><div class="summary-card-value" id="sumTotal">0</div><div class="summary-card-sub">Across all accounts</div></div>
           </div>
           <div class="action-btns fade-in">
             <button class="action-btn action-btn-primary" onclick="toggleForm('dep')">⬆&nbsp; Make a Deposit</button>
@@ -615,7 +616,7 @@ body{font-family:'Source Sans 3',sans-serif;background:var(--gray-100);color:var
             <div class="tx-alert" id="wdAlert"></div>
           </div>
           <div class="tx-table-wrap fade-in">
-            <div class="tx-table-header"><div class="tx-table-title">Account Activity</div><div class="tx-table-meta" id="txMeta">All transactions</div></div>
+            <div class="tx-table-header"><div class="tx-table-title">Full Transaction History</div><div class="tx-table-meta" id="txMeta">All transactions</div></div>
             <div class="table-scroll">
               <table class="tx-table">
                 <thead><tr><th>Description</th><th>Type</th><th>Date &amp; Time</th><th>Amount</th></tr></thead>
@@ -896,13 +897,14 @@ function doLogin() {
   resetAttempts(pendingUsername);
   err.classList.remove('show');
   currentUser = USERS[pendingUsername].displayName;
+  currentUsername = pendingUsername;
   document.getElementById('loginPassword').value = '';
   show('dashScreen');
   renderDash();
 }
 
 /* ════════ CORE STATE ════════ */
-let currentUser = null, selId = null;
+let currentUser = null, currentUsername = null, selId = null;
 
 /* ── Persistent storage ── */
 const DB_KEY = 'crestfield_db';
@@ -930,7 +932,7 @@ function switchTab(name, el) {
 }
 
 function logout() {
-  currentUser = null; selId = null;
+  currentUser = null; currentUsername = null; selId = null;
   pendingUsername = '';
   document.getElementById('loginUsername').value = '';
   document.getElementById('loginPassword').value = '';
@@ -941,28 +943,28 @@ function logout() {
 function renderDash() {
   document.getElementById('userName').textContent = currentUser.split(' ')[0];
   document.getElementById('lastLogin').textContent = ts();
-  if (!db[currentUser]) {
+  if (!db[currentUsername]) {
     const id = acctMask();
-    db[currentUser] = { accounts: [{ id, name: 'Crestfield Checking', balance: 5000, transactions: [{ type: 'dep', amount: 5000, note: 'Direct deposit — Payroll', time: ts(), ref: uid() }] }], sel: id };
+    db[currentUsername] = { accounts: [{ id, name: 'Crestfield Checking', balance: 5000, transactions: [{ type: 'dep', amount: 5000, note: 'Direct deposit — Payroll', time: ts(), ref: uid() }] }], sel: id };
     saveDB();
   }
   switchTab('accounts', document.querySelector('.dash-nav-item'));
   renderAccList();
-  selectAccount(db[currentUser].sel || db[currentUser].accounts[0]?.id);
+  selectAccount(db[currentUsername].sel || db[currentUsername].accounts[0]?.id);
 }
 
 function renderAccList() {
   const el = document.getElementById('accList'); el.innerHTML = '';
-  db[currentUser].accounts.forEach(a => {
+  db[currentUsername].accounts.forEach(a => {
     const d = document.createElement('div');
-    d.className = 'acc-item' + (a.id === db[currentUser].sel ? ' active' : '');
+    d.className = 'acc-item' + (a.id === db[currentUsername].sel ? ' active' : '');
     d.innerHTML = `<div class="acc-item-row"><div><div class="acc-item-label">${a.name}</div><div class="acc-item-num">${a.id}</div></div><div><div class="acc-item-bal">${fmt(a.balance)}</div><div class="acc-item-bal-label">Available</div></div></div>`;
     d.onclick = () => selectAccount(a.id); el.appendChild(d);
   });
 }
 
 function selectAccount(id) {
-  db[currentUser].sel = id; selId = id; saveDB(); renderAccList();
+  db[currentUsername].sel = id; selId = id; saveDB(); renderAccList();
   const no = document.getElementById('noAccState'), main = document.getElementById('mainPanel');
   if (!id) { no.style.display = 'block'; main.style.display = 'none'; return; }
   no.style.display = 'none'; main.style.display = 'block';
@@ -971,20 +973,29 @@ function selectAccount(id) {
 
 function refreshMain() {
   const a = getAcc(); if (!a) return;
+
+  // Header shows selected account info
   document.getElementById('detailName').textContent = a.name;
   document.getElementById('detailNum').textContent = `Account Number: ${a.id}  ·  Routing: ${routing}`;
   document.getElementById('detailBal').textContent = fmt(a.balance);
   document.getElementById('detailDate').textContent = dateStr();
+
+  // Summary cards — this account only
   const deps = a.transactions.filter(t => t.type === 'dep' || t.type === 'xfr-in');
-  const wds = a.transactions.filter(t => t.type === 'wd' || t.type === 'xfr-out');
+  const wds  = a.transactions.filter(t => t.type === 'wd'  || t.type === 'xfr-out');
   document.getElementById('sumDep').textContent = fmt(deps.reduce((s, t) => s + t.amount, 0));
   document.getElementById('sumDepCount').textContent = `${deps.length} credit transaction${deps.length !== 1 ? 's' : ''}`;
   document.getElementById('sumWd').textContent = fmt(wds.reduce((s, t) => s + t.amount, 0));
   document.getElementById('sumWdCount').textContent = `${wds.length} debit transaction${wds.length !== 1 ? 's' : ''}`;
   document.getElementById('sumTotal').textContent = a.transactions.length;
-  document.getElementById('txMeta').textContent = `Showing ${a.transactions.length} transaction${a.transactions.length !== 1 ? 's' : ''}`;
+  document.getElementById('txMeta').textContent = `Showing ${a.transactions.length} transaction${a.transactions.length !== 1 ? 's' : ''} for this account`;
+
+  // Transaction table — this account only, newest first
   const tbody = document.getElementById('txBody'); tbody.innerHTML = '';
-  if (!a.transactions.length) { tbody.innerHTML = '<tr><td colspan="4" style="padding:3rem;text-align:center;color:var(--gray-400);">📋&nbsp; No transactions to display.</td></tr>'; return; }
+  if (!a.transactions.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:3rem;text-align:center;color:var(--gray-400);">📋&nbsp; No transactions yet. Make a deposit to get started.</td></tr>';
+    return;
+  }
   [...a.transactions].reverse().forEach(tx => {
     const isIn = tx.type === 'dep' || tx.type === 'xfr-in';
     const tagClass = tx.type === 'dep' ? 'dep' : tx.type === 'wd' ? 'wd' : 'xfr';
@@ -992,13 +1003,21 @@ function refreshMain() {
     const icon = tx.type === 'dep' ? '↑' : tx.type === 'wd' ? '↓' : '↔';
     const amtClass = tx.type === 'dep' ? 'dep' : tx.type === 'wd' ? 'wd' : isIn ? 'xfr-in' : 'xfr-out';
     const tr = document.createElement('tr'); tr.className = 'fade-in';
-    tr.innerHTML = `<td><span class="tx-type-icon ${tagClass}">${icon}</span><span class="tx-desc-main">${tx.note}</span><div style="margin-left:34px;"><span class="tx-desc-ref">Ref: ${tx.ref}</span></div></td><td><span class="tx-tag ${tagClass}">${tagLabel}</span></td><td class="tx-date-cell">${tx.time}</td><td><span class="tx-amount ${amtClass}">${isIn ? '+' : '−'}${fmt(tx.amount)}</span></td>`;
+    tr.innerHTML = `
+      <td>
+        <span class="tx-type-icon ${tagClass}">${icon}</span>
+        <span class="tx-desc-main">${tx.note}</span>
+        <div style="margin-left:34px;"><span class="tx-desc-ref">Ref: ${tx.ref}</span></div>
+      </td>
+      <td><span class="tx-tag ${tagClass}">${tagLabel}</span></td>
+      <td class="tx-date-cell">${tx.time}</td>
+      <td><span class="tx-amount ${amtClass}">${isIn ? '+' : '−'}${fmt(tx.amount)}</span></td>`;
     tbody.appendChild(tr);
   });
   renderAccList();
 }
 
-function getAcc() { return db[currentUser].accounts.find(a => a.id === selId); }
+function getAcc() { return db[currentUsername].accounts.find(a => a.id === selId); }
 function toggleForm(type) {
   const df = document.getElementById('depForm'), wf = document.getElementById('wdForm');
   if (type === 'dep') { const o = df.classList.contains('open'); df.classList.toggle('open', !o); wf.classList.remove('open'); }
@@ -1034,7 +1053,7 @@ function doWithdraw() {
 }
 
 function populateTransferDropdowns() {
-  const accs = db[currentUser].accounts;
+  const accs = db[currentUsername].accounts;
   ['xfrFrom', 'xfrTo'].forEach(id => {
     const sel = document.getElementById(id); sel.innerHTML = '';
     accs.forEach(a => { const o = document.createElement('option'); o.value = a.id; o.textContent = `${a.name} (${fmt(a.balance)})`; sel.appendChild(o); });
@@ -1049,8 +1068,8 @@ function doTransfer() {
   const al = document.getElementById('xfrAlert');
   if (fromId === toId) { showAlert(al, 'Please select two different accounts.', 'err'); return; }
   if (!amt || amt <= 0) { showAlert(al, 'Please enter a valid transfer amount.', 'err'); return; }
-  const from = db[currentUser].accounts.find(a => a.id === fromId);
-  const to = db[currentUser].accounts.find(a => a.id === toId);
+  const from = db[currentUsername].accounts.find(a => a.id === fromId);
+  const to = db[currentUsername].accounts.find(a => a.id === toId);
   if (amt > from.balance) { showAlert(al, `Insufficient balance in ${from.name}.`, 'err'); return; }
   const ref = uid();
   from.balance -= amt; from.transactions.push({ type: 'xfr-out', amount: amt, note: `Transfer to ${to.name} — ${note}`, time: ts(), ref });
@@ -1111,12 +1130,24 @@ function createAccount() {
   const name = t.value === 'Custom' ? document.getElementById('customName').value.trim() : t.value;
   const bal = parseFloat(document.getElementById('newBal').value) || 0;
   if (!name) { alert('Please enter an account name.'); return; }
+
+  // Each new account gets its own id and its own fresh transaction list
   const id = acctMask();
   const txns = bal > 0 ? [{ type: 'dep', amount: bal, note: 'Opening deposit', time: ts(), ref: uid() }] : [];
-  db[currentUser].accounts.push({ id, name, balance: bal, transactions: txns });
+
+  // Push new account — never touches existing accounts
+  db[currentUsername].accounts.push({ id, name, balance: bal, transactions: txns });
   saveDB();
-  closeModal('newAcc'); selectAccount(id);
-  showToast(`✓ ${name} opened successfully.`);
+
+  // Reset modal fields for next use
+  document.getElementById('newAccType').value = 'Checking Account';
+  document.getElementById('customNameWrap').style.display = 'none';
+  document.getElementById('customName').value = '';
+  document.getElementById('newBal').value = '';
+
+  closeModal('newAcc');
+  selectAccount(id); // switch view to new account — old accounts still exist in sidebar
+  showToast(`✓ ${name} opened successfully. Select it in the sidebar to view its history.`);
 }
 </script>
 <script>document.querySelectorAll('.auto-year').forEach(el=>el.textContent=new Date().getFullYear());</script>
@@ -1452,7 +1483,7 @@ function unlockUser(uname) {
 
 function clearUserData(uname) {
   if (!confirm(`Clear all account data for ${USERS[uname].displayName}? This removes all accounts and transactions but keeps the user.`)) return;
-  delete db[USERS[uname].displayName];
+  delete db[uname];
   saveDB();
   addLog(`Cleared account data for: ${USERS[uname].displayName} (${uname})`, 'warn');
   showAdminToast(`✓ All data cleared for ${USERS[uname].displayName}.`);
