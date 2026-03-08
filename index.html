@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -944,13 +943,21 @@ function renderDash() {
   document.getElementById('userName').textContent = currentUser.split(' ')[0];
   document.getElementById('lastLogin').textContent = ts();
   if (!db[currentUsername]) {
+    // Brand new user — create their first account
     const id = acctMask();
     db[currentUsername] = { accounts: [{ id, name: 'Crestfield Checking', balance: 5000, transactions: [{ type: 'dep', amount: 5000, note: 'Direct deposit — Payroll', time: ts(), ref: uid() }] }], sel: id };
     saveDB();
+  } else {
+    // Returning user — make sure transactions arrays exist on all accounts (safety check)
+    db[currentUsername].accounts.forEach(a => {
+      if (!Array.isArray(a.transactions)) a.transactions = [];
+    });
   }
+  // Restore selId from saved db so history survives refresh
+  selId = db[currentUsername].sel || db[currentUsername].accounts[0]?.id;
   switchTab('accounts', document.querySelector('.dash-nav-item'));
   renderAccList();
-  selectAccount(db[currentUsername].sel || db[currentUsername].accounts[0]?.id);
+  selectAccount(selId);
 }
 
 function renderAccList() {
