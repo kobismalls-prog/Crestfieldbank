@@ -888,8 +888,10 @@ function doLogin() {
     const rem = MAX_LOGIN - attempts;
     if (rem <= 0) {
       err.textContent = 'Account locked due to too many failed attempts. Contact the administrator to unlock.';
+      addLog(`🔒 ${USERS[pendingUsername]?.displayName || pendingUsername} locked after too many failed login attempts`, 'err', 'security');
     } else {
       err.textContent = `Incorrect password. ${rem} attempt${rem !== 1 ? 's' : ''} remaining before account lock.`;
+      addLog(`⚠️ Failed login attempt for ${USERS[pendingUsername]?.displayName || pendingUsername} — ${attempts}/${MAX_LOGIN} attempts`, 'warn', 'security');
     }
     err.classList.add('show');
     document.getElementById('loginPassword').value = '';
@@ -899,6 +901,7 @@ function doLogin() {
   err.classList.remove('show');
   currentUser = USERS[pendingUsername].displayName;
   currentUsername = pendingUsername;
+  addLog(`✅ ${currentUser} signed in successfully`, 'ok', 'login');
   document.getElementById('loginPassword').value = '';
   show('dashScreen');
   renderDash();
@@ -933,6 +936,7 @@ function switchTab(name, el) {
 }
 
 function logout() {
+  if (currentUser) addLog(`👋 ${currentUser} signed out`, 'info', 'login');
   currentUser = null; currentUsername = null; selId = null;
   pendingUsername = '';
   document.getElementById('loginUsername').value = '';
@@ -1042,6 +1046,7 @@ function doDeposit() {
   const a = getAcc(); a.balance += amt;
   a.transactions.push({ type: 'dep', amount: amt, note, time: ts(), ref: uid() });
   saveDB();
+  addLog(`💰 ${currentUser} deposited ${fmt(amt)} into ${a.name} — "${note}"`, 'ok', 'transaction');
   document.getElementById('depAmt').value = ''; document.getElementById('depNote').value = '';
   showAlert(al, `✓ Your deposit of ${fmt(amt)} has been processed successfully.`, 'ok');
   refreshMain();
@@ -1056,6 +1061,7 @@ function doWithdraw() {
   if (amt > a.balance) { showAlert(al, 'This transaction exceeds your available balance.', 'err'); return; }
   a.balance -= amt; a.transactions.push({ type: 'wd', amount: amt, note, time: ts(), ref: uid() });
   saveDB();
+  addLog(`💸 ${currentUser} withdrew ${fmt(amt)} from ${a.name} — "${note}"`, 'warn', 'transaction');
   document.getElementById('wdAmt').value = ''; document.getElementById('wdNote').value = '';
   showAlert(al, `✓ Your withdrawal of ${fmt(amt)} has been processed successfully.`, 'ok');
   refreshMain();
@@ -1084,6 +1090,7 @@ function doTransfer() {
   from.balance -= amt; from.transactions.push({ type: 'xfr-out', amount: amt, note: `Transfer to ${to.name} — ${note}`, time: ts(), ref });
   to.balance += amt; to.transactions.push({ type: 'xfr-in', amount: amt, note: `Transfer from ${from.name} — ${note}`, time: ts(), ref });
   saveDB();
+  addLog(`🔄 ${currentUser} transferred ${fmt(amt)} from ${from.name} to ${to.name}`, 'info', 'transaction');
   document.getElementById('xfrAmt').value = ''; document.getElementById('xfrNote').value = '';
   showAlert(al, `✓ ${fmt(amt)} transferred from ${from.name} to ${to.name} successfully.`, 'ok');
   populateTransferDropdowns();
@@ -1147,6 +1154,7 @@ function createAccount() {
   // Push new account — never touches existing accounts
   db[currentUsername].accounts.push({ id, name, balance: bal, transactions: txns });
   saveDB();
+  addLog(`🏦 ${currentUser} opened new account: ${name}${bal > 0 ? ` with opening deposit of ${fmt(bal)}` : ''}`, 'ok', 'transaction');
 
   // Reset modal fields for next use
   document.getElementById('newAccType').value = 'Checking Account';
@@ -1230,6 +1238,7 @@ function createAccount() {
 .admin-log-dot.warn{background:#fbbf24;}
 .admin-log-dot.err{background:#f87171;}
 .admin-log-dot.info{background:#60a5fa;}
+.log-filter-btn.active{background:rgba(37,99,196,.5)!important;border-color:rgba(96,165,250,.5)!important;color:white!important;}
 
 /* admin modal */
 .admin-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:1000;padding:1rem;}
@@ -1362,9 +1371,16 @@ function createAccount() {
 
       <!-- Activity Log -->
       <div class="admin-section">
-        <div class="admin-section-header">
+        <div class="admin-section-header" style="flex-wrap:wrap;gap:.5rem;">
           <div class="admin-section-title">📋 Activity Log</div>
-          <button class="btn-tbl btn-tbl-red" onclick="clearLog()">Clear Log</button>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;">
+            <button class="btn-tbl btn-tbl-blue log-filter-btn active" onclick="setLogFilter('all',this)">All</button>
+            <button class="btn-tbl btn-tbl-blue log-filter-btn" onclick="setLogFilter('login',this)">🔑 Logins</button>
+            <button class="btn-tbl btn-tbl-blue log-filter-btn" onclick="setLogFilter('transaction',this)">💰 Transactions</button>
+            <button class="btn-tbl btn-tbl-blue log-filter-btn" onclick="setLogFilter('security',this)">⚠️ Security</button>
+            <button class="btn-tbl btn-tbl-blue log-filter-btn" onclick="setLogFilter('admin',this)">🛡️ Admin</button>
+            <button class="btn-tbl btn-tbl-red" onclick="clearLog()">Clear Log</button>
+          </div>
         </div>
         <div id="adminLog"><div style="padding:2rem;text-align:center;color:rgba(255,255,255,.25);font-size:13px;">No activity recorded yet.</div></div>
       </div>
@@ -1396,7 +1412,7 @@ let ADMIN_PASSWORD = 'Admin@2024!';
 /* ════════ ADMIN STATE ════════ */
 let adminModalMode = '';
 let editingUsername = '';
-let adminLogEntries = [];
+// adminLogEntries loaded from localStorage in addLog section below
 
 function adminLogin() {
   const u = document.getElementById('adminUsername').value.trim();
@@ -1426,6 +1442,7 @@ function adminLogout() {
 }
 
 function renderAdminPanel() {
+  adminLogEntries = loadLog(); // always pull fresh from storage
   const users = Object.entries(USERS);
   const locked = users.filter(([,v]) => v.locked).length;
   document.getElementById('statUsers').textContent = users.length;
@@ -1632,23 +1649,59 @@ function adminModalSave() {
 }
 
 /* ════════ LOG ════════ */
-function addLog(msg, type) {
-  adminLogEntries.unshift({ msg, type, time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) });
-  if (adminLogEntries.length > 50) adminLogEntries.pop();
+const LOG_KEY = 'crestfield_log';
+function loadLog() { try { return JSON.parse(localStorage.getItem(LOG_KEY)) || []; } catch(e) { return []; } }
+function saveLog() { try { localStorage.setItem(LOG_KEY, JSON.stringify(adminLogEntries)); } catch(e) {} }
+
+function addLog(msg, type, category) {
+  const entry = {
+    msg, type,
+    category: category || 'admin',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  };
+  adminLogEntries.unshift(entry);
+  if (adminLogEntries.length > 200) adminLogEntries.pop();
+  saveLog();
 }
 
+// Load log from storage on startup
+let adminLogEntries = loadLog();
+
+let logFilter = 'all';
 function renderLog() {
   const el = document.getElementById('adminLog');
-  if (!adminLogEntries.length) { el.innerHTML = '<div style="padding:2rem;text-align:center;color:rgba(255,255,255,.25);font-size:13px;">No activity recorded yet.</div>'; return; }
-  el.innerHTML = adminLogEntries.map(e => `
+  const filtered = logFilter === 'all' ? adminLogEntries : adminLogEntries.filter(e => e.category === logFilter);
+  if (!filtered.length) {
+    el.innerHTML = '<div style="padding:2rem;text-align:center;color:rgba(255,255,255,.25);font-size:13px;">No activity recorded yet.</div>';
+    return;
+  }
+  const catIcon = { admin:'🛡️', login:'🔑', transaction:'💰', security:'⚠️' };
+  el.innerHTML = filtered.map(e => `
     <div class="admin-log-entry">
       <div class="admin-log-dot ${e.type}"></div>
-      <div class="admin-log-msg">${e.msg}</div>
+      <div style="flex:1;">
+        <div class="admin-log-msg">${e.msg}</div>
+        <div style="font-size:10.5px;color:rgba(255,255,255,.2);margin-top:2px;">${catIcon[e.category]||'📋'} ${e.category} &nbsp;·&nbsp; ${e.date}</div>
+      </div>
       <div class="admin-log-time">${e.time}</div>
     </div>`).join('');
 }
 
-function clearLog() { if (confirm('Clear all activity log entries?')) { adminLogEntries = []; renderLog(); } }
+function setLogFilter(f, el) {
+  logFilter = f;
+  document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderLog();
+}
+
+function clearLog() {
+  if (confirm('Clear all activity log entries?')) {
+    adminLogEntries = [];
+    saveLog();
+    renderLog();
+  }
+}
 
 function showAdminToast(msg) { showToast(msg); }
 
